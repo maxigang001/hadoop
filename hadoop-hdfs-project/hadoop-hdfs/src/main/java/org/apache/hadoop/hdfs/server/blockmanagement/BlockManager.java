@@ -2031,11 +2031,15 @@ public class BlockManager implements BlockStatsMXBean {
       final Set<Node> excludedNodes = new HashSet<>(rw.getContainingNodes());
 
       // Exclude all nodes which already exists as targets for the block
-      List<DatanodeStorageInfo> targets =
-          pendingReconstruction.getTargets(rw.getBlock());
-      if (targets != null) {
-        for (DatanodeStorageInfo dn : targets) {
-          excludedNodes.add(dn.getDatanodeDescriptor());
+      synchronized (pendingReconstruction) {
+        List<DatanodeStorageInfo> targets =
+                pendingReconstruction.getTargets(rw.getBlock());
+        if (targets != null) {
+          for (DatanodeStorageInfo dn : targets) {
+            if(!excludedNodes.contains(dn.getDatanodeDescriptor())){
+              excludedNodes.add(dn.getDatanodeDescriptor());
+            }
+          }
         }
       }
 
@@ -5319,149 +5323,4 @@ public class BlockManager implements BlockStatsMXBean {
                 break;
               }
               action = queue.poll();
-            } while (action != null);
-          } finally {
-            namesystem.writeUnlock();
-            metrics.addBlockOpsBatched(processed - 1);
-          }
-        } catch (InterruptedException e) {
-          // ignore unless thread was specifically interrupted.
-          if (Thread.interrupted()) {
-            break;
-          }
-        }
-      }
-      queue.clear();
-    }
-
-    void enqueue(Runnable action) throws InterruptedException {
-      if (!queue.offer(action)) {
-        if (!isAlive() && namesystem.isRunning()) {
-          ExitUtil.terminate(1, getName()+" is not running");
-        }
-        long now = Time.monotonicNow();
-        if (now - lastFull > 4000) {
-          lastFull = now;
-          LOG.info("Block report queue is full");
-        }
-        queue.put(action);
-      }
-    }
-  }
-
-  /**
-   * @return redundancy thread.
-   */
-  @VisibleForTesting
-  Daemon getRedundancyThread() {
-    return redundancyThread;
-  }
-
-  public BlockIdManager getBlockIdManager() {
-    return blockIdManager;
-  }
-
-  public long nextGenerationStamp(boolean legacyBlock) throws IOException {
-    return blockIdManager.nextGenerationStamp(legacyBlock);
-  }
-
-  public boolean isLegacyBlock(Block block) {
-    return blockIdManager.isLegacyBlock(block);
-  }
-
-  public long nextBlockId(BlockType blockType) {
-    return blockIdManager.nextBlockId(blockType);
-  }
-
-  boolean isGenStampInFuture(Block block) {
-    return blockIdManager.isGenStampInFuture(block);
-  }
-
-  boolean isReplicaCorrupt(BlockInfo blk, DatanodeDescriptor d) {
-    return corruptReplicas.isReplicaCorrupt(blk, d);
-  }
-
-  private int setBlockIndices(BlockInfo blk, byte[] blockIndices, int i,
-                              DatanodeStorageInfo storage) {
-    // TODO this can be more efficient
-    if (blockIndices != null) {
-      byte index = ((BlockInfoStriped)blk).getStorageBlockIndex(storage);
-      assert index >= 0;
-      blockIndices[i++] = index;
-    }
-    return i;
-  }
-
-  private static long getBlockRecoveryTimeout(long heartbeatIntervalSecs) {
-    return TimeUnit.SECONDS.toMillis(heartbeatIntervalSecs *
-        BLOCK_RECOVERY_TIMEOUT_MULTIPLIER);
-  }
-
-  @VisibleForTesting
-  public void setBlockRecoveryTimeout(long blockRecoveryTimeout) {
-    pendingRecoveryBlocks.setRecoveryTimeoutInterval(blockRecoveryTimeout);
-  }
-
-  @VisibleForTesting
-  public ProvidedStorageMap getProvidedStorageMap() {
-    return providedStorageMap;
-  }
-
-  /**
-   * Create SPS manager instance. It manages the user invoked sps paths and does
-   * the movement.
-   *
-   * @param conf
-   *          configuration
-   * @return true if the instance is successfully created, false otherwise.
-   */
-  private boolean createSPSManager(final Configuration conf) {
-    return createSPSManager(conf, null);
-  }
-
-  /**
-   * Create SPS manager instance. It manages the user invoked sps paths and does
-   * the movement.
-   *
-   * @param conf
-   *          configuration
-   * @param spsMode
-   *          satisfier mode
-   * @return true if the instance is successfully created, false otherwise.
-   */
-  public boolean createSPSManager(final Configuration conf,
-      final String spsMode) {
-    // sps manager manages the user invoked sps paths and does the movement.
-    // StoragePolicySatisfier(SPS) configs
-    boolean storagePolicyEnabled = conf.getBoolean(
-        DFSConfigKeys.DFS_STORAGE_POLICY_ENABLED_KEY,
-        DFSConfigKeys.DFS_STORAGE_POLICY_ENABLED_DEFAULT);
-    String modeVal = spsMode;
-    if (org.apache.commons.lang3.StringUtils.isBlank(modeVal)) {
-      modeVal = conf.get(DFSConfigKeys.DFS_STORAGE_POLICY_SATISFIER_MODE_KEY,
-          DFSConfigKeys.DFS_STORAGE_POLICY_SATISFIER_MODE_DEFAULT);
-    }
-    StoragePolicySatisfierMode mode = StoragePolicySatisfierMode
-        .fromString(modeVal);
-    if (!storagePolicyEnabled || mode == StoragePolicySatisfierMode.NONE) {
-      LOG.info("Storage policy satisfier is disabled");
-      return false;
-    }
-    spsManager = new StoragePolicySatisfyManager(conf, namesystem);
-    return true;
-  }
-
-  /**
-   * Nullify SPS manager as this feature is disabled fully.
-   */
-  public void disableSPS() {
-    spsManager = null;
-  }
-
-  /**
-   * @return sps manager.
-   */
-  public StoragePolicySatisfyManager getSPSManager() {
-    return spsManager;
-  }
-}
+          
